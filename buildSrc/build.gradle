@@ -1,0 +1,24 @@
+apply plugin: 'groovy'
+
+repositories {
+    maven {
+        url 'http://download.osgeo.org/webdav/geotools/'
+    }
+    jcenter()
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    compile gradleApi(),
+            localGroovy(),
+            'com.septimajs:septima-js-generator:0.0.6'
+    runtime 'com.septimajs:septima-js-sql-driver-db2:0.0.6',
+            'com.septimajs:septima-js-sql-driver-h2:0.0.6',
+            'com.septimajs:septima-js-sql-driver-mssql:0.0.6',
+            'com.septimajs:septima-js-sql-driver-mysql:0.0.6',
+            'com.septimajs:septima-js-sql-driver-oracle:0.0.6', // Warning! Remove or add only with oracle-driver-ojdbc6
+            'com.hynnet:oracle-driver-ojdbc6:12.1.0.1',
+            'com.septimajs:septima-js-sql-driver-postgresql:0.0.6'
+
+}

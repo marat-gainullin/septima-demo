@@ -1,0 +1,300 @@
+import com.septima.entities.SqlEntities
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
+
+import javax.naming.Context
+import javax.naming.InitialContext
+
+System.setProperty(Context.INITIAL_CONTEXT_FACTORY, Jndi.class.getName())
+
+buildscript {
+    repositories {
+        jcenter()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+        mavenLocal()
+    }
+    dependencies {
+        classpath 'com.septimajs:septima-js-data:0.0.6',
+                'com.h2database:h2:1.4.193',
+                'com.zaxxer:HikariCP:2.7.6'
+    }
+}
+
+apply plugin: 'war'
+war {
+    webXml = file('src/web.xml')
+}
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'utf-8'
+    options.compilerArgs << '--add-modules=jdk.incubator.httpclient'
+}
+
+def rawsLocation = "${buildDir}/generated/raw"
+def domainLocation = "${buildDir}/generated/domain"
+
+sourceSets {
+    main {
+        java {
+            srcDirs = [
+                    'src/main/java',
+                    rawsLocation,
+                    domainLocation
+            ]
+        }
+    }
+}
+
+configurations {
+    compile.transitive = false
+    tomcat
+    sharedLibs
+    h2
+}
+
+def tomcatVersion = '9.0.2'
+
+repositories {
+    jcenter()
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly 'javax.servlet:javax.servlet-api:3.1.0',
+            'javax.websocket:javax.websocket-api:1.1',
+            'javax.mail:mail:1.4.7'
+    compile 'com.septimajs:septima-js-model:0.0.6',
+            'com.septimajs:septima-js-data:0.0.6',
+            'com.septimajs:septima-js-application:0.0.6',
+            'com.fasterxml.jackson.core:jackson-core:2.9.2',
+            'com.fasterxml.jackson.core:jackson-databind:2.9.2'
+    runtime 'com.septimajs:septima-js-sql-driver-h2:0.0.6'
+    tomcat "org.apache.tomcat:tomcat-catalina:$tomcatVersion",
+            "org.apache.tomcat:tomcat-jasper:$tomcatVersion",
+            "org.apache.tomcat:tomcat-dbcp:$tomcatVersion",
+            "org.apache.tomcat:tomcat-websocket:$tomcatVersion",
+            "org.apache.tomcat:tomcat-jaspic-api:$tomcatVersion",
+            'javax.mail:mail:1.4.7'
+    sharedLibs 'com.h2database:h2:1.4.193'
+    // , ... another jdbc driver for another database
+    h2 'com.h2database:h2:1.4.193'
+}
+
+def tomcatDir = "${buildDir}/tomcat"
+def tomcatBinDir = "${tomcatDir}/bin"
+def sharedLibDir = "${tomcatDir}/lib"
+def h2Dir = "${System.getProperty('user.home')}/.septima/h2"
+
+task buildTomcatBin(type: Copy) {
+    configurations.tomcat.each {
+        from file(it)
+    }
+    into tomcatBinDir
+}
+
+task buildSharedLibs(type: Copy) {
+    configurations.sharedLibs.each {
+        from file(it)
+    }
+    into sharedLibDir
+}
+
+task buildTomcat() {
+}
+
+buildTomcat.dependsOn buildTomcatBin, buildSharedLibs
+
+task cleanTomcat(type: Delete) {
+    delete tomcatDir
+}
+
+clean.dependsOn cleanTomcat
+
+task warExplode(type: Copy) {
+    with war
+    into "$tomcatDir/web-apps/${project['application.context']}"
+}
+
+task configureTomcat(type: Copy) {
+    outputs.upToDateWhen { false }
+    from 'src/tomcat'
+    into "${tomcatDir}/conf"
+    rename 'default-web.xml', 'web.xml'
+}
+
+task tomcatCommand(type: JavaExec) {
+    workingDir tomcatDir
+    classpath fileTree(tomcatBinDir)
+    main 'org.apache.catalina.startup.Bootstrap'
+    jvmArgs '-Xdebug',
+            "-Xrunjdwp:server=y,transport=dt_socket,address=${project['debug.port']},suspend=n",
+            '--add-modules=jdk.incubator.httpclient',
+            "-Djava.util.logging.config.file=${file(tomcatDir)}/conf/logging.properties",
+            "-Dapplication.context=${project['application.context']}",
+            "-Dhttp.port=${project['http.port']}",
+            "-Ddatasource.url=${project['datasource.url']}",
+            "-Ddatasource.user=${project['datasource.user']}",
+            "-Ddatasource.password=${project['datasource.password']}",
+            "-Ddatasource.schema=${project['datasource.schema']}",
+            "-Ddatasource.driverClass=${project['datasource.driverClass']}"
+}
+
+def launchTomcat = {
+    def instance = new ProcessBuilder(tomcatCommand.commandLine)
+            .directory(file(tomcatCommand.workingDir))
+            .redirectErrorStream(true).start()
+    def stdOut = new InputStreamReader(instance.getInputStream())
+    try {
+        def tomcatNextLine = stdOut.readLine()
+        while (tomcatNextLine != null && !tomcatNextLine.contains('Server startup in')) {
+            if (!tomcatNextLine.isEmpty())
+                println(tomcatNextLine)
+            tomcatNextLine = stdOut.readLine()
+        }
+        if (tomcatNextLine != null && !tomcatNextLine.isEmpty())
+            println(tomcatNextLine)
+        println()
+        println 'Tomcat started.'
+        println "Further logs you can find at: ${tomcatDir}/logs"
+    } finally {
+        stdOut.close()
+    }
+    return instance
+}
+
+def shutdownTomcat = { instance ->
+    instance.destroy()
+    instance.waitFor()
+    println()
+    println 'Tomcat shutted down'
+}
+
+task buildH2(type: Copy) {
+    configurations.h2.each {
+        from file(it)
+    }
+    into h2Dir
+}
+
+task h2Command(type: JavaExec) {
+    classpath fileTree(h2Dir)
+    main 'org.h2.tools.Server'
+    args '-tcp'
+}
+
+def launchH2 = {
+    def h2Server = new ProcessBuilder(h2Command.commandLine)
+            .redirectErrorStream(true)
+            .start()
+    def h2StdOut = new InputStreamReader(h2Server.getInputStream())
+    try {
+        def h2NextLine = h2StdOut.readLine()
+        while (!h2NextLine.contains('TCP server running at')) {
+            if (!h2NextLine.isEmpty())
+                println(h2NextLine)
+            h2NextLine = h2StdOut.readLine()
+        }
+        if (!h2NextLine.isEmpty())
+            println(h2NextLine)
+        println("H2 started")
+        println()
+    } finally {
+        h2StdOut.close()
+    }
+    return h2Server
+}
+
+task fillH2() {
+    doFirst {
+        def runScript = {
+            org.h2.tools.RunScript.main(
+                    '-url', project['datasource.url'],
+                    '-user', project['datasource.user'],
+                    '-password', project['datasource.password'],
+                    '-script', "${projectDir}/base.sql"
+            )
+            println 'Application database filled'
+        }
+        try {
+            runScript()
+        } catch (org.h2.jdbc.JdbcSQLException ex) {
+            if (ex.cause instanceof java.net.ConnectException) {
+                println 'H2 is not running. Trying to start it ...'
+                launchH2()
+                runScript()
+            } else {
+                throw ex
+            }
+        }
+        delete generateRaws.outputs
+        println 'Generated raws cleared'
+    }
+}
+fillH2.dependsOn buildH2
+
+task run() {
+    doFirst {
+        def tomcatServer = launchTomcat()
+        println "Application is now served at http://localhost:${project['http.port']}/${project['application.context']}"
+        println()
+        println 'To terminate press enter ...'
+        System.in.read()
+        shutdownTomcat tomcatServer
+        println()
+        println 'See you next time :)'
+    }
+}
+run.dependsOn buildTomcat,
+        configureTomcat,
+        warExplode,
+        fillH2
+
+def boundDatasource = null
+
+task bindDataSource() {
+    doFirst {
+        def naming = new InitialContext()
+        HikariConfig config = new HikariConfig()
+        config.jdbcUrl = project['datasource.url']
+        config.username = project['datasource.user']
+        config.password = project['datasource.password']
+        //config.schema = project['datasource.schema']
+        config.driverClassName = project['datasource.driverClass']
+        boundDatasource = new HikariDataSource(config)
+        naming.bind 'septima-demo', boundDatasource
+        println 'Data source has been bound'
+    }
+}
+bindDataSource.dependsOn fillH2
+
+def sqlEntitiesSource = new SqlEntities(file('src/main/resources/sql-entities').toPath(), 'septima-demo')
+
+task generateRaws(type: GenerateRaws) {
+    sqlEntities = sqlEntitiesSource
+    sqlEntitiesDir = sqlEntitiesSource.getEntitiesRoot().toFile()
+    generatedSourcesDir = file(rawsLocation)
+    doLast {
+        delete generateDomains.outputs
+        println 'Generated domains cleared'
+    }
+}
+generateRaws.dependsOn bindDataSource
+
+task generateDomains(type: GenerateDomains) {
+    sqlEntities = sqlEntitiesSource
+    modelsDir = file('src/main/models')
+    generatedSourcesDir = file(domainLocation)
+}
+generateDomains.dependsOn generateRaws
+
+compileJava.dependsOn generateDomains
+
+gradle.buildFinished {
+    if (boundDatasource) {
+        boundDatasource.close()
+        println 'Data source has been unbound'
+    }
+}

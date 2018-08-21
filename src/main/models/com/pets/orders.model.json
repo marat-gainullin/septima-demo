@@ -1,0 +1,8 @@
+{
+  "pets": {
+    "entity": "com/pets/pet"
+  },
+  "owners": {
+    "entity": "com/pets/owner"
+  }
+}

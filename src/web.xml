@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee
+                      http://xmlns.jcp.org/xml/ns/javaee/web-app_3_1.xsd"
+         version="3.1">
+    <context-param>
+        <param-name>data-source</param-name>
+        <param-value>septima-demo-data</param-value>
+    </context-param>
+    <context-param>
+        <param-name>jdbc.max.threads</param-name>
+        <param-value>16</param-value>
+    </context-param>
+    <context-param>
+        <param-name>scope.queue.size</param-name>
+        <param-value>1024</param-value>
+    </context-param>
+    <context-param>
+        <param-name>resources.entities.path</param-name>
+        <param-value>/sql-entities</param-value>
+    </context-param>
+    <listener>
+        <listener-class>com.septima.application.Data$Init</listener-class>
+    </listener>
+    <listener>
+        <listener-class>com.septima.application.Scope$Init</listener-class>
+    </listener>
+    <listener>
+        <listener-class>com.septima.application.Scope$SessionInit</listener-class>
+    </listener>
+</web-app>
